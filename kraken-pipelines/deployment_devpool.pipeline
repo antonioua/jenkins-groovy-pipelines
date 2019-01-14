@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+    environment {
+        docker_remote_host = "docker-host"
+        docker_remote_port = "4321"
+        container_name = "prj1"
+        container_hostname = "prj1-host"
+        docker_mount_dir = "/opt/data"
+        docker_img = "registry.com:1234/image:prj1.0"
+        http_proxy = "http://proxy-host"
+        https_proxy = "https://proxy-host"
+        npm_config_cache = "npm_cache"
+        npm_config_registry = "http://host/repository/npmjs/"
+        no_proxy = "*.com"
+    }
+
+    stages {
+        stage("Start container") {
+            steps {
+                script {
+
+                    echo "Removing ${container_name} container..."
+                    try {
+                        sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port} DOCKER_TLS_VERIFY=1;\
+                            docker stop ${container_name};\
+                            docker rm ${container_name}"
+                    } catch (Exception e) {
+                        print "Nothing to delete. Looks like it is your first run."
+                    }
+
+                    echo "Starting new ${container_name} container..."
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port} DOCKER_TLS_VERIFY=1; \
+                        docker pull ${docker_img}; \
+                        docker run -it -d \
+                        --name ${container_name} \
+                        -e \"http_proxy=${http_proxy}\" \
+                        -e \"https_proxy=${https_proxy}\" \
+                        -e \"npm_config_cache=${npm_config_cache}\" \
+                        -e \"npm_config_registry=${npm_config_registry}\" \
+                        -e \"no_proxy={no_proxy}\" \
+                        --hostname ${container_hostname} \
+                        -v /etc/localtime:/etc/localtime \
+                        -v ${docker_mount_dir}:/root/data \
+                        --publish 3001:5353 \
+                        --privileged \
+                        ${docker_img}"
+                }
+            }
+        }
+        stage("Execute commands withing container") {
+            steps {
+                script {
+                    echo "Starting app in ${container_name}"
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port} DOCKER_TLS_VERIFY=1; \
+                        docker exec -t ${container_name} bash -c \" \
+                        git clone -b ${VCS_REF_PRETTY_LOOK} git@github.com prj1; \
+                        cd data; \
+                        npm i && npm install forever -g; \
+                        mkdir -p /root/data/db; \
+                        forever start server.js pathDB=/root/db/database.db\" "
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,85 @@
+pipeline {
+    agent any
+    environment {
+        docker_remote_host = "docker-host.com"
+        docker_remote_port = "4321"
+        s3_endpoint_url = "s3-host.com"
+        s3_endpoint_url_full = "http://s3-host.com:1234"
+        s3_bucket_name = "bucket1"
+        s3_access_key_id = "keyid"
+        s3_secret_access_key = "secretkeyy"
+        http_proxy = "http://proxy-host"
+        https_proxy = "http://proxy-host"
+    }
+
+    stages {
+        stage("Start s3 server") {
+            steps {
+                script {
+                    echo "Removing running s3 container..."
+                    try {
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port};\
+                        docker stop s3;\
+                        docker rm s3"
+                    } catch (Exception e) {
+                        print "Nothing to delete. Looks like it is your first run."
+                    }
+
+                    echo "Starting new s3 container..."
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port};\
+                        docker run -d \
+                          --name s3 \
+                          --hostname ${docker_remote_host} \
+                          -p 8000:8000 -i -t \
+                          -e ENDPOINT=${s3_endpoint_url} \
+                          -e SCALITY_ACCESS_KEY_ID=${s3_access_key_id} \
+                          -e SCALITY_SECRET_ACCESS_KEY=${s3_secret_access_key} \
+                          -e S3BACKEND=file \
+                          -e LOG_LEVEL=info \
+                          -e S3DATAPATH=/usr/src/app/localMetadata \
+                          -v /storage/docker_container_data/s3_metadata:/usr/src/app/localMetadata \
+                          -e S3METADATAPATH=/usr/src/app/localdata \
+                          -v /storage/docker_container_data/s3_data:/usr/src/app/localdata  \
+                          --restart=always \
+                          scality/s3server:mem-latest"
+                }
+            }
+        }
+        stage("Setup s3 server") {
+            steps {
+                script {
+                    echo "Waiting till s3 service is up..."
+                    sh "sleep 10"
+                    //waitUntil {
+                    //    sh 'timeout 120 wget --retry-connrefused --tries=120 --waitretry=1 -q ${s3_endpoint_url_full} -O /dev/null'
+                    //}
+                    echo "Building image for node prj..."
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port};\
+                        docker build -t \
+                          my-registry/node-test:latest \
+                          --build-arg http_proxy=${http_proxy} \
+                          --build-arg https_proxy=${https_proxy} \
+                          -f ./infra-services/zenko-s3-cache-server/tools/Dockerfile ."
+                    echo "Creating bucket..."
+                    try {
+                    sh "export no_proxy=${docker_remote_host} DOCKER_HOST=tcp://${docker_remote_host}:${docker_remote_port};\
+                        docker run -d --rm \
+                          --name test-s3 \
+                          --hostname ${docker_remote_host} \
+                          -e S3_ENDPOINT_URL=${s3_endpoint_url_full} \
+                          -e HTTP_PROXY=${http_proxy} \
+                          -e HTTPS_PROXY=${https_proxy} \
+                          -e S3_ACCESS_KEY_ID=${s3_access_key_id} \
+                          -e S3_SECRET_ACCESS_KEY=${s3_secret_access_key} \
+                          -e S3_BUCKET_NAME=${s3_bucket_name} \
+                          my-registry/node-test:latest"
+                    } catch (Exception e) {
+                        print e
+                        print "Skipping warnings..."
+                    }
+                }
+
+            }
+        }
+    }
+}

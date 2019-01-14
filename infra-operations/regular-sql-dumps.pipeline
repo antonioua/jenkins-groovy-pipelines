@@ -1,0 +1,45 @@
+currentBuild.description = "Regular dumps"
+
+def GenerateArrayOfObj(Projects) {
+    def prjsArr = Projects.split(",")
+    def stepsForParallel = [:]
+
+    for (i = 0; i < prjsArr.size(); i++) {
+        def prjName = prjsArr[i]
+        stepsForParallel["Running for ${prjName}"] = {
+            build job: "SQL_Dump", parameters: [[$class: "StringParameterValue", name: "PRJ_NAME", value: prjName],
+                                                [$class: "StringParameterValue", name: "ENVIRONMENT", value: "Production"],
+                                                [$class: "StringParameterValue", name: "INSTANCE", value: "admin"],
+                                                [$class: "StringParameterValue", name: "ENV_NW", value: "infra"],
+                                                [$class: "StringParameterValue", name: "UPLOAD_TO", value: "gala-sftp"],
+                                                [$class: "StringParameterValue", name: "RECEPIENTS", value: ""]
+            ]
+        }
+    }
+    return stepsForParallel
+}
+
+pipeline {
+    agent {
+        label "master"
+    }
+    triggers {
+        cron('0 5 * * 0-4')
+    }
+    parameters {
+        string(name: "Projects", defaultValue: "prj1,prj2,prj3", description: "Project list")
+    }
+    stages {
+        stage("Build SQL dumps") {
+            steps {
+                script {
+                    stepsForParallel = GenerateArrayOfObj(Projects)
+                    parallel(stepsForParallel)
+                }
+
+            }
+
+
+        }
+    }
+}
